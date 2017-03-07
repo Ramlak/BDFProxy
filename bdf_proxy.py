@@ -27,12 +27,9 @@
     POSSIBILITY OF SUCH DAMAGE.
     Tested on Kali-Linux.
 """
-try:
-    from mitmproxy import controller, proxy, platform
-    from mitmproxy.proxy.server import ProxyServer
-except:
-    from libmproxy import controller, proxy, platform
-    from libmproxy.proxy.server import ProxyServer
+
+from mitmproxy import controller, platform, options, flow
+from mitmproxy.proxy import ProxyServer, ProxyConfig
 import os
 from bdf import pebin
 from bdf import elfbin
@@ -141,7 +138,7 @@ class EnhancedOutput:
         EnhancedOutput.print_info("File size: {0} KB".format(size))
 
 
-class ProxyMaster(controller.Master):
+class ProxyMaster(flow.FlowMaster):
     user_config = None
     host_blacklist = []
     host_whitelist = []
@@ -155,11 +152,7 @@ class ProxyMaster(controller.Master):
     archive_patch_count = 0
 
     patchIT = False
-
-    def __init__(self, srv):
-        controller.Master.__init__(self, srv)
-
-        self.magicNumbers = {'elf': {'number': '7f454c46'.decode('hex'), 'offset': 0},
+    magicNumbers = {'elf': {'number': '7f454c46'.decode('hex'), 'offset': 0},
                              'pe': {'number': 'MZ', 'offset': 0},
                              'gz': {'number': '1f8b'.decode('hex'), 'offset': 0},
                              'bz': {'number': 'BZ', 'offset': 0},
@@ -170,10 +163,12 @@ class ProxyMaster(controller.Master):
                              'machox86': {'number': 'cefaedfe'.decode('hex'), 'offset': 0},
                              }
 
+
+
     def run(self):
         try:
             EnhancedOutput.logging_debug("Starting ProxyMaster")
-            return controller.Master.run(self)
+            return flow.FlowMaster.run(self)
         except KeyboardInterrupt:
             self.shutdown()
 
@@ -192,6 +187,14 @@ class ProxyMaster(controller.Master):
             self.keys_whitelist = self.user_config['keywords']['whitelist']
         except Exception as e:
             EnhancedOutput.print_error("Missing field from config file: {0}".format(e))
+
+    @controller.handler
+    def error(self, l):
+	return
+
+    @controller.handler
+    def log(self, l, *args):
+	return
 
     def set_config_archive(self, ar):
         try:
@@ -710,15 +713,15 @@ class ProxyMaster(controller.Master):
 
         return buf
     '''
-
-    def handle_request(self, flow):
+    @controller.handler
+    def request(self, flow):
         print "*" * 10, "REQUEST", "*" * 10
         EnhancedOutput.print_info("HOST: {0}".format(flow.request.host))
-        EnhancedOutput.print_info("PATH: {0}".format(flow.request.path))
-        flow.reply()
+        EnhancedOutput.print_info("PATH: {0}".format(flow.request.path))      
         print "*" * 10, "END REQUEST", "*" * 10
 
-    def handle_response(self, flow):
+    @controller.handler
+    def response(self, flow):
         # Read config here for dynamic updating
         self.set_config()
 
@@ -755,8 +758,6 @@ class ProxyMaster(controller.Master):
         if self.patchIT is False:
             EnhancedOutput.print_warning("Not patching, flow did not make it through config settings")
             EnhancedOutput.logging_info("Config did not allow the patching of HOST: {0}, PATH: {1}".format(flow.request.host, flow.request.path))
-
-            flow.reply()
         else:
             if self.bytes_have_format(flow.reply.obj.response.content, 'zip') and self.str2bool(self.CompressedFiles) is True:
                     aZipFile = flow.reply.obj.response.content
@@ -802,8 +803,6 @@ class ProxyMaster(controller.Master):
                 self.set_config_archive('TAR')
                 flow.reply.obj.response.content = self.inject_tar(flow.reply.obj.response.content, 'tar')
 
-            flow.reply()
-
         print "=" * 10, "END RESPONSE", "=" * 10
 
 ################################## START MAIN #######################################
@@ -817,18 +816,17 @@ user_config = ConfigObj(CONFIGFILE)
 #################### BEGIN OVERALL CONFIGS ############################
 # DOES NOT UPDATE ON THE FLY
 resourceScript = user_config['Overall']['resourceScriptFile']
-
-config = proxy.ProxyConfig(clientcerts=os.path.expanduser(user_config['Overall']['certLocation']),
+opts = options.Options(clientcerts=os.path.expanduser(user_config['Overall']['certLocation']),
                            body_size_limit=int(user_config['Overall']['MaxSizeFileRequested']),
-                           port=int(user_config['Overall']['proxyPort']),
+                           listen_port=int(user_config['Overall']['proxyPort']),
                            mode=user_config['Overall']['proxyMode'],
                            )
+config = ProxyConfig(opts)
 
 if user_config['Overall']['proxyMode'] != "None":
     config.proxy_mode = {'sslports': user_config['Overall']['sslports'],
                          'resolver': platform.resolver()
                          }
-
 server = ProxyServer(config)
 
 numericLogLevel = getattr(logging, user_config['Overall']['loglevel'].upper(), None)
@@ -865,8 +863,9 @@ try:
 except Exception as e:
     EnhancedOutput.print_error(e)
     sys.exit(1)
+state = flow.State()
 
-m = ProxyMaster(server)
+m = ProxyMaster(opts, server, state)
 try:
     m.set_config()
 except Exception as e:
