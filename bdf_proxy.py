@@ -27,9 +27,13 @@
     POSSIBILITY OF SUCH DAMAGE.
     Tested on Kali-Linux.
 """
+try:
+    from mitmproxy import controller, platform, options, flow
+    from mitmproxy.proxy import ProxyServer, ProxyConfig
+except:
+    from libmproxy import controller, platform, options, flow
+    from libmproxy.proxy import ProxyServer, ProxyConfig
 
-from mitmproxy import controller, platform, options, flow
-from mitmproxy.proxy import ProxyServer, ProxyConfig
 import os
 from bdf import pebin
 from bdf import elfbin
